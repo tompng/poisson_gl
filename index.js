@@ -1,5 +1,4 @@
 let THREE = require('three');
-
 function createRenderTarget(w, h, option){
   option = option || {}
   return new THREE.WebGLRenderTarget(w, h, {
@@ -11,7 +10,7 @@ function createRenderTarget(w, h, option){
     type: option.type || THREE.FloatType,
     stencilBuffer: false,
     depthBuffer: false
-  });
+  })
 }
 
 class PoissonSolverGL {
@@ -20,7 +19,7 @@ class PoissonSolverGL {
     let extensions = ['OES_texture_float', 'OES_texture_float_linear']
     let gl = renderer.getContext()
     extensions.forEach((ext) => {
-      if(!gl.getExtension()) throw 'not supported: ' + ext
+      if(!gl.getExtension(ext)) throw 'not supported: ' + ext
     })
     this.scene = new THREE.Scene()
     this.camera = new THREE.Camera()
@@ -28,52 +27,82 @@ class PoissonSolverGL {
     this.scene.add(this.mesh)
     this.camera.position.z = 1
     this.format = format || THREE.RGBAFormat
+    this.size = size
     this.textures = {}
+    this._prepare()
   }
   static target(size, format){
     return createRenderTarget(size, size, { format: format })
   }
-  _target(type, size) {
+  dispose(){
+    for(let key in thiss){
+      this.textures[key].dispose()
+    }
+    this.textures = {}
+  }
+  _target(type, size){
     let key = type + '-' + size
     if(!this.textures[key]){
       this.textures[key] = PoissonSolverGL.target(size, this.format)
     }
+    return this.textures[key]
   }
   poisson(texture, out){
     if(!out) out = this._target('poisson', this.size)
-    this._renderWithDelta(out, poissonShader, { texture: texture }, size)
+    this._render(out, poissonShader, this.size, { texture: texture })
+    return out
+  }
+  show(texture){
+    this._render(null, identityShader, this.size, { texture: texture })
   }
   solve(f, out){
     if(!out) out = this._target('out', this.size)
-    this._solve(f, out, size)
+    this._solve(f, out, this.size)
     return out
   }
-  _solve(f, out, size){
-    let tmp = this._target('tmp', this.size)
-    this._renderWithDelta(tmp, smoothShader, { ftexture: f, itexture: out }, size)
-    if(size > 4){
-      let f2 = this._target('f', this.size)
-      let o2 = this._target('o2', this.size/2)
-      let o3 = this._target('o3', this.size/2)
-      this._renderWithDelta(f2, diffShader, { ftexture: f, itexture: tmp }, size)
-      this._solve(f2, o2, o3, size/2)
-      this._add(tmp, o3, 0.25, f2)
+  _prepare(){
+    this._target('out', this.size)
+    for(let size = this.size; size > 4; size /= 2){
+      this._target('f2', size)
+      this._target('o2', size / 2)
+      size /= 2
     }
-    this._renderWithDelta(out, smoothShader, { ftexture: f, itexture: tmp }, size)
+    this.size
   }
-  _renderWithDelta(o, shader, unforms, size){
-    this._render(o, shader, Object.assign({ delta: 1.0 / size }, uniforms))
+  _solve(f, out, size){
+    let tmp = this._target('tmp', size)
+    for(var i=0;i<0;i++){
+      this._render(tmp, smoothShader, size, { ftexture: f, itexture: out })
+      this._render(out, smoothShader, size, { ftexture: f, itexture: tmp })
+    }
+    this._render(tmp, smoothShader, size, { ftexture: f, itexture: out })
+    if(size > 4){
+      let f2 = this._target('f2', size)
+      let o2 = this._target('o2', size / 2)
+      this._render(f2, diffShader, size, { ftexture: f, itexture: tmp })
+      this._render(o2, zeroShader)
+      this._solve(f2, o2, size / 2)
+      this._add(f2, size, tmp, o2, -4)
+      tmp = f2
+    }
+    this._render(out, smoothShader, size, { ftexture: f, itexture: tmp })
+    for(var i=0;i<0;i++){
+      this._render(tmp, smoothShader, size, { ftexture: f, itexture: out })
+      this._render(out, smoothShader, size, { ftexture: f, itexture: tmp })
+    }
   }
-  _render(o, shader, uniforms){
+  _render(o, shader, size, uniforms){
     this.mesh.material = shader
+    if(shader.uniforms.delta)shader.uniforms.delta.value = 1.0 / size
     for(let key in uniforms){
       let uniform = shader.uniforms[key]
-      if(uniform)uniform.value = uniforms[key]
+      let value = uniforms[key]
+      if(uniform)uniform.value = value.texture || value
     }
     this.renderer.render(this.scene, this.camera, o)
   }
-  add(o, t1, t2, s){
-    this._render(o, addShader, { texture1: t1, texture2: t2, scale: s })
+  _add(o, size, t1, t2, s){
+    this._render(o, addShader, size, { texture1: t1, texture2: t2, scale: s })
   }
 }
 
@@ -94,11 +123,13 @@ function createShader(uniforms, fragCode){
   })
 }
 let identityShader = createShader(
-  { texture: { type: 't' } },
+  { texture: { type: 't' }, delta: { type: 'f' } },
   `
   uniform sampler2D texture;
+  uniform float delta;
   void main(){
-    gl_FragColor = texture2D(texture, gl_FragCoord.xy)
+    gl_FragColor = texture2D(texture, gl_FragCoord.xy * delta);
+    gl_FragColor.a = 1.0;
   }
   `
 )
@@ -109,7 +140,7 @@ let smoothShader = createShader(
   uniform sampler2D itexture, ftexture;
   uniform float delta;
   void main(){
-    vec2 coord = gl_FragCoord.xy;
+    vec2 coord = gl_FragCoord.xy * delta;
     vec2 dx = vec2(delta, 0);
     vec2 dy = vec2(0, delta);
     gl_FragColor = (
@@ -129,8 +160,7 @@ let diffShader = createShader(
   uniform sampler2D itexture, ftexture;
   uniform float delta;
   void main(){
-    vec4 val = texture2D(wave, gl_FragCoord.xy);
-    vec2 coord = gl_FragCoord.xy;
+    vec2 coord = gl_FragCoord.xy * delta;
     vec2 dx = vec2(delta, 0);
     vec2 dy = vec2(0, delta);
     gl_FragColor = (
@@ -138,7 +168,7 @@ let diffShader = createShader(
       + texture2D(itexture, coord + dx)
       + texture2D(itexture, coord - dy)
       + texture2D(itexture, coord + dy)
-      - 4 * texture2D(itexture, coord)
+      - 4.0 * texture2D(itexture, coord)
       - texture2D(ftexture, coord)
     );
   }
@@ -151,7 +181,7 @@ let poissonShader = createShader(
   uniform sampler2D texture;
   uniform float delta;
   void main(){
-    vec2 coord = gl_FragCoord.xy;
+    vec2 coord = gl_FragCoord.xy * delta;
     vec2 dx = vec2(delta, 0);
     vec2 dy = vec2(0, delta);
     gl_FragColor = (
@@ -159,19 +189,24 @@ let poissonShader = createShader(
       + texture2D(texture, coord + dx)
       + texture2D(texture, coord - dy)
       + texture2D(texture, coord + dy)
-      - 4 * texture2D(texture, coord)
+      - 4.0 * texture2D(texture, coord)
     );
   }
   `
 )
 
+let zeroShader = createShader(
+  {},
+  `void main(){gl_FragColor = vec4(0,0,0,0);}`
+)
+
 let addShader = createShader(
-  { texture1: { type: 't' }, texture2: { type: 't' }, scale: { type: 'f' } },
+  { texture1: { type: 't' }, texture2: { type: 't' }, scale: { type: 'f' }, delta: { type: 'f' } },
   `
   uniform sampler2D texture1, texture2;
-  uniform float scale;
+  uniform float delta, scale;
   void main(){
-    vec2 coord = gl_FragCoord.xy;
+    vec2 coord = gl_FragCoord.xy * delta;
     gl_FragColor = texture2D(texture1, coord) + scale * texture2D(texture2, coord);
   }
   `
