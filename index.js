@@ -71,10 +71,6 @@ class PoissonSolverGL {
   }
   _solve(f, out, size){
     let tmp = this._target('tmp', size)
-    for(var i=0;i<0;i++){
-      this._render(tmp, smoothShader, size, { ftexture: f, itexture: out })
-      this._render(out, smoothShader, size, { ftexture: f, itexture: tmp })
-    }
     this._render(tmp, smoothShader, size, { ftexture: f, itexture: out })
     if(size > 4){
       let f2 = this._target('f2', size)
@@ -86,10 +82,6 @@ class PoissonSolverGL {
       tmp = f2
     }
     this._render(out, smoothShader, size, { ftexture: f, itexture: tmp })
-    for(var i=0;i<0;i++){
-      this._render(tmp, smoothShader, size, { ftexture: f, itexture: out })
-      this._render(out, smoothShader, size, { ftexture: f, itexture: tmp })
-    }
   }
   _render(o, shader, size, uniforms){
     this.mesh.material = shader
