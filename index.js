@@ -56,7 +56,10 @@ class PoissonSolverGL {
     this._render(null, identityShader, this.size, { texture: texture })
   }
   solve(f, out){
-    if(!out) out = this._target('out', this.size)
+    if(!out){
+      out = this._target('out', this.size)
+      this._render(out, zeroShader)
+    }
     this._solve(f, out, this.size)
     return out
   }
@@ -71,17 +74,21 @@ class PoissonSolverGL {
   }
   _solve(f, out, size){
     let tmp = this._target('tmp', size)
-    this._render(tmp, smoothShader, size, { ftexture: f, itexture: out })
+    let output = out || this._target('out', size)
+    if(out){
+      this._render(tmp, smoothShader, size, { ftexture: f, itexture: out })
+    }else{
+      this._render(tmp, scaleShader, size, { texture: f, scale: -1.0 / 4 })
+    }
     if(size > 4){
       let f2 = this._target('f2', size)
-      let o2 = this._target('o2', size / 2)
       this._render(f2, diffShader, size, { ftexture: f, itexture: tmp })
-      this._render(o2, zeroShader)
-      this._solve(f2, o2, size / 2)
+      let o2 = this._solve(f2, null, size / 2)
       this._add(f2, size, tmp, o2, -4)
       tmp = f2
     }
-    this._render(out, smoothShader, size, { ftexture: f, itexture: tmp })
+    this._render(output, smoothShader, size, { ftexture: f, itexture: tmp })
+    return output
   }
   _render(o, shader, size, uniforms){
     this.mesh.material = shader
@@ -200,6 +207,17 @@ let addShader = createShader(
   void main(){
     vec2 coord = gl_FragCoord.xy * delta;
     gl_FragColor = texture2D(texture1, coord) + scale * texture2D(texture2, coord);
+  }
+  `
+)
+
+let scaleShader = createShader(
+  { texture: { type: 't' }, scale: { type: 'f' }, delta: { type: 'f' } },
+  `
+  uniform sampler2D texture;
+  uniform float delta, scale;
+  void main(){
+    gl_FragColor = scale * texture2D(texture, gl_FragCoord.xy * delta);
   }
   `
 )
