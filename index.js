@@ -47,7 +47,7 @@ class PoissonSolverGL {
     }
     return this.textures[key]
   }
-  poisson(texture, out){
+  laplacian(texture, out){
     if(!out) out = this._target('poisson', this.size)
     this._render(out, poissonShader, this.size, { texture: texture })
     return out

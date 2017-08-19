@@ -39,7 +39,7 @@ onload=()=>{
   renderer.domElement.style.cssText = "border: 1px solid red;"
   img.onload=()=>{
     solver = new PoissonSolverGL(renderer, 512)
-    let poi = solver.poisson(texture, null)
+    let poi = solver.laplacian(texture)
     solver.show(poi)
     solver.solve(poi)
     setTimeout(()=>{
